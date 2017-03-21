@@ -1,3 +1,5 @@
+//curlsingle.cpp
+
 #include <iostream>
 #include <string>
 
@@ -5,16 +7,15 @@
 
 using namespace std;
 
-size_t WriteFunction(char *contents, size_t size, size_t nmemb, string *resultptr) {
-	for (int c = 0; c<size*nmemb; c++) {
+size_t CurlSingleWriteFunction(char *contents, size_t size, size_t nmemb, string *resultptr) {
+	for (size_t c = 0; c<size*nmemb; c++) {
 		resultptr->push_back(contents[c]);
 	}
 	
 	return size*nmemb;
 }
 
-int main(void)
-{
+string curl_url(string url) {
 	CURL *curl_handle;
 	CURLcode res;
  
@@ -26,10 +27,10 @@ int main(void)
 	curl_handle = curl_easy_init();
 
 	/* specify URL to get */ 
-	curl_easy_setopt(curl_handle, CURLOPT_URL, "http://www.nd.edu/");
+	curl_easy_setopt(curl_handle, CURLOPT_URL, url.c_str());
 
 	/* send all data to this function  */ 
-	curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, WriteFunction);
+	curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, CurlSingleWriteFunction);
 
 	/* we pass our 'chunk' struct to the callback function */ 
 	curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, &result);
@@ -44,9 +45,7 @@ int main(void)
 	/* check for errors */ 
 	if(res != CURLE_OK) {
 		cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << endl;
-	}
-	else {
-		cout << endl << result << endl;
+		result = "failure";
 	}
  
 	/* cleanup curl stuff */ 
@@ -55,5 +54,5 @@ int main(void)
 	/* we're done with libcurl, so clean it up */ 
 	curl_global_cleanup();
  
-	return 0;
+	return result;
 }
