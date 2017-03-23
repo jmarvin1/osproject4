@@ -18,6 +18,7 @@
 
 // include c modules
 #include <time.h>
+#include <csignal>
 
 // include custom c++ function files
 #include "curlsingle.h"
@@ -46,6 +47,7 @@ queue<parse_data> parses;
 // create global mutexes
 mutex m_fetches;
 mutex m_parses;
+
 
 void fetch_thread_function()
 {
@@ -98,7 +100,22 @@ void parse_thread_function()
 	// --------------------------------------------------------------------------------------------
 }
 
-int main( int argc, char * argv[])
+void signalHandler( int signum )
+{
+	/* exits gracefully after current queues have been emptied */
+	
+	while (!fetches.empty())
+	{
+		continue;
+	}
+	while (!parses.empty())
+	{
+		continue;
+	}
+	exit(0);
+}
+
+int main( int argc, char * argv[] )
 {
 	/* main program execution */
 	
@@ -192,9 +209,10 @@ int main( int argc, char * argv[])
 		parse_threads[i] = thread(parse_thread_function);
 	}
 	
-	/* --------------- catch interrupts to exit gracefully --------------- */
+	/* --------------- catch interrupt signals to exit gracefully --------------- */
 	
-	// -------------------------------------------------------------------------------------------
+	signal(SIGINT, signalHandler);
+	signal(SIGHUP, signalHandler);
 	
 	/* --------------- fill queue every (per) seconds --------------- */
 	
