@@ -41,13 +41,15 @@ string curl_url(string url) {
 	
 	/* set option to follow embedded redirects in html header */
 	curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
+	
+	/* set option to timeout after 5 minutes */
+	curl_easy_setopt(curl_handle, CURLOPT_CONNECTTIMEOUT, 300);
 
 	/* get it! */ 
 	res = curl_easy_perform(curl_handle);
 
 	/* check for errors */ 
 	if(res != CURLE_OK) {
-		cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << endl;
 		result = "failure";
 	}
  

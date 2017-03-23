@@ -17,6 +17,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <algorithm>
+#include <chrono>
 
 // include c modules
 #include <time.h>
@@ -30,12 +31,18 @@
 // namespace declaration
 using namespace std;
 
-// data structure for parses queue
+// data structure for queues
+struct fetch_data
+{
+	int run_num;
+	string source;
+};
 struct parse_data
 {
 	time_t fetchtime;
 	string source;
 	string body;
+	int run_num;
 };
 
 // create global vectors
@@ -43,7 +50,7 @@ vector<string> search_terms;
 vector<string> sites;
 
 // create global queues
-queue<string> fetches;
+queue<fetch_data> fetches;
 queue<parse_data> parses;
 
 // create global mutexes
@@ -55,6 +62,13 @@ mutex m_results;
 condition_variable cv_fetches;
 condition_variable cv_parses;
 
+bool file_exists(string filename)
+{
+	/* validates existence of file */
+	ifstream infile(filename);
+	return infile.good();
+}
+
 void fetch_thread_function()
 {
 	/* function to control a fetch thread */
@@ -64,10 +78,10 @@ void fetch_thread_function()
 	{
 		// lock m_fetches mutex
 		unique_lock<mutex> f_lock(m_fetches);
-		string source;
+		fetch_data src;
 		// get site from fetches queue
 		cv_fetches.wait(f_lock, []{return !fetches.empty();});
-		source = fetches.front();
+		src = fetches.front();
 		fetches.pop();
 		// unlock m_fetches mutex
 		f_lock.unlock();
@@ -75,12 +89,18 @@ void fetch_thread_function()
 		time_t f_time;
 		time(&f_time);
 		// download site data
-		string body = curl_url(source);
+		string body = curl_url(src.source);
+		// check curl_url() result for errors (timeout)
+		while (body.compare("failure") == 0)
+		{
+			body = curl_url(src.source);
+		}
 		// create data object for parses queue
 		parse_data d;
 		d.fetchtime = f_time;
-		d.source = source;
+		d.source = src.source;
 		d.body = body;
+		d.run_num = src.run_num;
 		// lock m_parses mutex
 		unique_lock<mutex> p_lock(m_parses);
 		// push data object to parses queue
@@ -119,8 +139,14 @@ void parse_thread_function()
 			timedate.erase(remove(timedate.begin(),timedate.end(), '\n'), timedate.end());
 			// lock results mutex
 			unique_lock<mutex> r_lock(m_results);
+			// create stream to output file
+			ofstream outfile;
+			string filename = to_string(db.run_num) + ".csv";
+			outfile.open(filename, ofstream::out | ofstream::app);
 			// output results
-			cout << timedate << "," << target << "," << db.source << "," << count << endl;
+			outfile << timedate << "," << target << "," << db.source << "," << count << endl;
+			// close output file
+			outfile.close();
 			// unlock results mutex
 			r_lock.unlock();
 		}
@@ -141,8 +167,11 @@ void signalHandler( int signum )
 	{
 		continue;
 	}
-	// close output filestream
-	// -------------------------------------------------------------------------------
+	// sleep for 1 second to ensure parse threads are finished
+	this_thread::sleep_for(chrono::milliseconds(1));
+	// ensure no files are being edited
+	unique_lock<mutex> r_lock(m_results);
+	
 	exit(0);
 }
 
@@ -220,6 +249,18 @@ int main( int argc, char * argv[] )
 		}
 	}
 	
+	// ensure specified search and sites files exist
+	if (!file_exists(searf))
+	{
+		cerr << "Error: " << searf << " is an infalid file" << endl;
+		exit(1);
+	}
+	if (!file_exists(sitf))
+	{
+		cerr << "Error: " << sitf << " is an infalid file" << endl;
+		exit(1);
+	}
+	
 	// parse search terms file into search_terms vector
 	search_terms = parseFile(searf);
 	// parse sites file into sites vector
@@ -251,9 +292,25 @@ int main( int argc, char * argv[] )
 	time_t old_time;
 	time_t c_time;
 	// fill queue
+	fetch_data fd;
+	int rn = 1;
+	// lock results mutex
+	unique_lock<mutex> r_lock(m_results);
+	// create stream to output file
+	ofstream outfile;
+	string filename = to_string(rn) + ".csv";
+	outfile.open(filename, ofstream::out | ofstream::app);
+	// output results
+	outfile << "Time,Phrase,Site,Count" << endl;
+	// close output file
+	outfile.close();
+	// unlock results mutex
+	r_lock.unlock();
 	for (string source : sites)
 	{
-		fetches.push(source);
+		fd.source = source;
+		fd.run_num = rn;
+		fetches.push(fd);
 		// signal condition variable
 		cv_fetches.notify_one();
 	}
@@ -267,10 +324,26 @@ int main( int argc, char * argv[] )
 		// fill queue again if (per) seconds has passed
 		if (difftime(c_time,old_time) > (float)per)
 		{
+			// increment run number
+			rn++;
+			// lock results mutex
+			r_lock.lock();
+			// create stream to output file
+			ofstream outfile;
+			string filename = to_string(rn) + ".csv";
+			outfile.open(filename, ofstream::out | ofstream::app);
+			// output results
+			outfile << "Time,Phrase,Site,Count" << endl;
+			// close output file
+			outfile.close();
+			// unlock results mutex
+			r_lock.unlock();
 			// fill queue
 			for (string source : sites)
 			{
-				fetches.push(source);
+				fd.source = source;
+				fd.run_num = rn;
+				fetches.push(fd);
 				// signal condition variable
 				cv_fetches.notify_one();
 			}

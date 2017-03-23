@@ -15,3 +15,4 @@ parse.o: parse.h parse.cpp
 clean:
 	rm *.o
 	rm site-tester
+	rm *.csv
