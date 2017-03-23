@@ -15,6 +15,8 @@
 #include <queue>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
+#include <algorithm>
 
 // include c modules
 #include <time.h>
@@ -47,7 +49,11 @@ queue<parse_data> parses;
 // create global mutexes
 mutex m_fetches;
 mutex m_parses;
+mutex m_results;
 
+// create global condition variables
+condition_variable cv_fetches;
+condition_variable cv_parses;
 
 void fetch_thread_function()
 {
@@ -58,18 +64,11 @@ void fetch_thread_function()
 	{
 		// lock m_fetches mutex
 		unique_lock<mutex> f_lock(m_fetches);
-		string source = " ";
+		string source;
 		// get site from fetches queue
-		while (strcmp(source," ") == 0)
-		{
-			// wait on condition variable on m_fetches
-			// ----------------------------------------------------------------------------------
-			if (!fetches.empty())
-			{
-				source = fetches.front();
-				fetches.pop();
-			}
-		}
+		cv_fetches.wait(f_lock, []{return !fetches.empty();});
+		source = fetches.front();
+		fetches.pop();
 		// unlock m_fetches mutex
 		f_lock.unlock();
 		// record time curl commences
@@ -87,7 +86,7 @@ void fetch_thread_function()
 		// push data object to parses queue
 		parses.push(d);
 		// signal on condition variable for m_parses
-		// ----------------------------------------------------------------------------------------
+		cv_parses.notify_one();
 		// unlock m_parses mutex
 		p_lock.unlock();
 	}
@@ -97,13 +96,43 @@ void parse_thread_function()
 {
 	/* function to control a parse thread */
 	
-	// --------------------------------------------------------------------------------------------
+	// continue loop until program ends
+	while (1)
+	{
+		// lock m_parses mutex
+		unique_lock<mutex> p_lock(m_parses);
+		parse_data db;
+		// get data from parses queue
+		cv_parses.wait(p_lock, []{return !parses.empty();});
+		db = parses.front();
+		parses.pop();
+		// unlock m_parses mutex
+		p_lock.unlock();
+		// parse data for each search term
+		for (string target : search_terms)
+		{
+			// count occurences of term
+			int count = count_occurrences(db.body, target);
+			// format lookup time
+			struct tm * datetm = gmtime(&(db.fetchtime));
+			string timedate(asctime(datetm));
+			timedate.erase(remove(timedate.begin(),timedate.end(), '\n'), timedate.end());
+			// lock results mutex
+			unique_lock<mutex> r_lock(m_results);
+			// output results
+			cout << timedate << "," << target << "," << db.source << "," << count << endl;
+			// unlock results mutex
+			r_lock.unlock();
+		}
+		
+	}
 }
 
 void signalHandler( int signum )
 {
 	/* exits gracefully after current queues have been emptied */
 	
+	// let queues empty
 	while (!fetches.empty())
 	{
 		continue;
@@ -112,6 +141,8 @@ void signalHandler( int signum )
 	{
 		continue;
 	}
+	// close output filestream
+	// -------------------------------------------------------------------------------
 	exit(0);
 }
 
@@ -224,10 +255,10 @@ int main( int argc, char * argv[] )
 	{
 		fetches.push(source);
 		// signal condition variable
-		// ---------------------------------------------------------------------------------------
+		cv_fetches.notify_one();
 	}
 	// get time
-	time(&old_time)
+	time(&old_time);
 	// loop to continue filling queue until program ends
 	while (1)
 	{
@@ -241,10 +272,10 @@ int main( int argc, char * argv[] )
 			{
 				fetches.push(source);
 				// signal condition variable
-				// -------------------------------------------------------------------------------
+				cv_fetches.notify_one();
 			}
 			// get time
-			time(&old_time)
+			time(&old_time);
 		}
 	}
 	
