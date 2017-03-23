@@ -6,7 +6,7 @@
 #include "parse.h"
 using namespace std;
 
-int main(int argc, char* argv[])
+/*int main(int argc, char* argv[])
 {
 	ifstream infile(argv[1]);
 	string line,delimeter;
@@ -67,7 +67,8 @@ int main(int argc, char* argv[])
 	cout<<endl;
 	
 
-}
+}*/
+
 vector<string> parseFile(string filename)
 {
 
