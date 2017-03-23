@@ -1,4 +1,4 @@
-//curlsingle.hpp
+//curlsingle.h
 
 #include <string>
 
