@@ -38,6 +38,9 @@ string curl_url(string url) {
 	/* some servers don't like requests that are made without a user-agent
 	 field, so we provide one */ 
 	curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, "libcurl-agent/1.0");
+	
+	/* set option to follow embedded redirects in html header */
+	curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
 
 	/* get it! */ 
 	res = curl_easy_perform(curl_handle);
