@@ -17,6 +17,23 @@
 
 void page_fault_handler( struct page_table *pt, int page )
 {
+	//bits = <PROT_READ|PROT_WRITE|PROT_EXEC>
+	
+	/* Page Table Functions */
+	//void page_table_set_entry(pt, int page, int frame, int bits);
+	//void page_table_get_entry(pt, int page, int *frame, int *bits);
+	//void page_table_print_entry(pt, int page);
+	//void page_table_print(pt);
+	//int page_table_get_nframes(pt);
+	//int page_table_get_npages(pt);
+	//char * page_table_get_virtmem(pt);
+	//char * page_table_get_physmem(pt);
+	
+	/* Disk Functions */
+	//void disk_write(disk, int block, char * data);
+	//void disk_read(disk, int block, char * data);
+	//int disk_nblocks(disk);
+	
 	printf("page fault on page #%d\n",page);
 	page_table_set_entry(pt,page,page,PROT_READ|PROT_WRITE);
 }
