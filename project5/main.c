@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 
 /* Global Variables */
 struct disk * disk; //the disk
@@ -53,18 +54,18 @@ void page_fault_handler( struct page_table *pt, int page )
 		page_table_get_entry(pt, page, &pframe, &pbits);
 		if (pbits == 1) { //PROT_READ
 			//page requires write permissions
-			page_table_set_entry(pt, page, pframe, PROT_READ|PROT_WRITE);
+			page_table_set_entry(pt, page, pframe, 3);
 			return;
 		}
 		
 		//get random page to overwrite
 		int nframes = page_table_get_nframes(pt);
-		int newframe = rand()%nframes;
+		int newframe = rand() % nframes;
 		int oldpage = frame_track[newframe];
 		//look if an empty frame is available instead
 		int i;
 		for (i=0; i<nframes; i++) {
-			if (frame_track[i] == 0) {
+			if (frame_track[i] == -1) {
 				//empty place found in frame, change newframe and indicate than no page needs to be overwritten
 				newframe = i;
 				oldpage= -1;
@@ -73,7 +74,7 @@ void page_fault_handler( struct page_table *pt, int page )
 		}
 		//save old page to disk if necissary
 		if (oldpage != -1) {
-			page_table_get_entry(pt, page, &pframe, &pbits);
+			page_table_get_entry(pt, oldpage, &pframe, &pbits);
 			if (pbits == 3) { //PROT_READ|PROT_WRITE
 				disk_write(disk, oldpage, &physmem[newframe*PAGE_SIZE]);
 			}
@@ -86,7 +87,7 @@ void page_fault_handler( struct page_table *pt, int page )
 			page_table_set_entry(pt, oldpage, 0, 0);
 		}
 		//update page table for new page
-		page_table_set_entry(pt, page, newframe, PROT_READ);
+		page_table_set_entry(pt, page, newframe, 1);
 		
 	}
 	else if (strcmp(algorithm,"fifo") == 0) { //--------------------------------------------------------------------
