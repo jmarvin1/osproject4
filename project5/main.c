@@ -21,6 +21,7 @@ struct disk * disk; //the disk
 const char * algorithm; //argv[3] - the sorting algorithm to use
 int * frame_track;
 int n_in_frame;
+int p;
 char * virtmem;
 char * physmem;
 
@@ -149,7 +150,85 @@ void page_fault_handler( struct page_table *pt, int page )
 		
 	}
 	else if (strcmp(algorithm,"custom") == 0) { //--------------------------------------------------------------------
-		//custom replacement
+		//custom replacement - lru using clock algorithm
+		
+		//give write permission if required and missing
+		int pframe = -1;
+		int pbits = -1;
+		page_table_get_entry(pt, page, &pframe, &pbits);
+		if (pbits == 1 || pbits == 6) { //PROT_READ or PROT_READ|PROT_EXEC
+			//page requires write permissions
+			page_table_set_entry(pt, page, pframe, 7);
+			return;
+		}
+		
+		int nframes = page_table_get_nframes(pt);
+		int newframe = -1;
+		int oldpage = -1;
+		int dirty = 0;
+		//look for an empty frame if one exists
+		if (n_in_frame < nframes) {
+			newframe = n_in_frame;
+			n_in_frame++;
+		}
+		else {
+			//no empty frames - use clock algorithm to select frame to replace
+			int runs = 1;
+			while (1) {
+				page_table_get_entry(pt, frame_track[p], &pframe, &pbits);
+				if (pbits == 6) {
+					//PROC_READ|PROC_EXEC
+					page_table_set_entry(pt, frame_track[p], pframe, 1);
+					p = (p+1) % nframes;
+					if (p == 0) {
+						runs ++;
+					}
+					continue;
+				}
+				else if (pbits == 1) {
+					//PROC_READ
+					newframe = p;
+					oldpage = frame_track[p];
+					break;
+				}
+				if (runs < 3) {
+					p = (p+1) % nframes;
+					if (p == 0) {
+						runs ++;
+					}
+					continue;
+				}
+				if (runs > 2) {
+					//every bit is dirty, a dirty bit has to be included
+					if (pbits == 7) {
+						//PROC_READ|PROC_WRITE|PROC_EXEC
+						page_table_set_entry(pt, frame_track[p], pframe, 3);
+						p = (p+1) % nframes;
+						continue;
+					}
+					else {
+						//PROC_READ|PROC_WRITE
+						newframe = p;
+						dirty = 1;
+						oldpage = frame_track[p];
+						break;
+					}
+				}
+			}
+		}
+		//save old page to disk if necissary
+		if (dirty) {
+			disk_write(disk, oldpage, &physmem[newframe*PAGE_SIZE]);
+		}
+		//read page into physical memory and update frame tracker
+		disk_read(disk, page, &physmem[newframe*PAGE_SIZE]);
+		frame_track[newframe] = page;
+		//update page table for old page if one was overwritten
+		if (oldpage != -1) {
+			page_table_set_entry(pt, oldpage, 0, 0);
+		}
+		//update page table for new page
+		page_table_set_entry(pt, page, newframe, 6);
 		
 	}
 	else if (strcmp(algorithm,"test") == 0) {//--------------------------------------------------------------------
@@ -198,7 +277,9 @@ int main( int argc, char *argv[] )
 	}
 	frame_track = frame_tracking; //global
 	
-	n_in_frame = 0;
+	n_in_frame = 0; //global
+	
+	p = 0; //global
 	
 	virtmem = page_table_get_virtmem(pt); //global
 	
