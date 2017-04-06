@@ -194,18 +194,19 @@ void page_fault_handler( struct page_table *pt, int page )
 					runs ++;
 				}
 				else if (pbits == 1) {
+					//PROT_READ
 					newframe = p;
 					oldpage = frame_track[p];
 					p = (p+1) % nframes;
 					break;
 				}
 				else if (pbits == 7) {
-					//PROC_READ|PROC_WRITE|PROC_EXEC
+					//PROT_READ|PROT_WRITE|PROT_EXEC
 					page_table_set_entry(pt, frame_track[p], pframe, 3);
 					p = (p+1) % nframes;
 				}
 				else if (pbits == 3){
-					//PROC_READ
+					//PROT_READ | PROT_WRITE
 					newframe = p;
 					oldpage = frame_track[p];
 					dirty = 1;
