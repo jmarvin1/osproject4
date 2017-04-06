@@ -25,8 +25,14 @@ int p;
 char * virtmem;
 char * physmem;
 
+//tracking variables
+int pagefaults;
+int diskreads;
+int diskwrites;
+
 void page_fault_handler( struct page_table *pt, int page )
 {
+	pagefaults++;
 	//bits = <PROT_READ|PROT_WRITE|PROT_EXEC>
 	
 	/* Page Table Functions */
@@ -79,10 +85,12 @@ void page_fault_handler( struct page_table *pt, int page )
 			page_table_get_entry(pt, oldpage, &pframe, &pbits);
 			if (pbits == 3) { //PROT_READ|PROT_WRITE
 				disk_write(disk, oldpage, &physmem[newframe*PAGE_SIZE]);
+				diskwrites++;
 			}
 		}
 		//read page into physical memory and update frame tracker
 		disk_read(disk, page, &physmem[newframe*PAGE_SIZE]);
+		diskreads++;
 		frame_track[newframe] = page;
 		//update page table for old page if one was overwritten
 		if (oldpage != -1) {
@@ -123,10 +131,12 @@ void page_fault_handler( struct page_table *pt, int page )
 			page_table_get_entry(pt, oldpage, &pframe, &pbits);
 			if (pbits == 3) { //PROT_READ|PROT_WRITE
 				disk_write(disk, oldpage, &physmem[newframe*PAGE_SIZE]);
+				diskwrites++;
 			}
 		}
 		//read page into physical memory and update frame tracker
 		disk_read(disk, page, &physmem[newframe*PAGE_SIZE]);
+		diskreads++;
 		//update record queue
 		if (oldpage == -1) {
 			//empty frame found, no need to shift, just record new frame
@@ -151,12 +161,12 @@ void page_fault_handler( struct page_table *pt, int page )
 	}
 	else if (strcmp(algorithm,"custom") == 0) { //--------------------------------------------------------------------
 		//custom replacement - lru using clock algorithm
-		
+
 		//give write permission if required and missing
 		int pframe = -1;
 		int pbits = -1;
 		page_table_get_entry(pt, page, &pframe, &pbits);
-		if (pbits == 1 || pbits == 6) { //PROT_READ or PROT_READ|PROT_EXEC
+		if (pbits == 1 || pbits == 5) { //PROT_READ or PROT_READ|PROT_EXEC
 			//page requires write permissions
 			page_table_set_entry(pt, page, pframe, 7);
 			return;
@@ -166,6 +176,7 @@ void page_fault_handler( struct page_table *pt, int page )
 		int newframe = -1;
 		int oldpage = -1;
 		int dirty = 0;
+		
 		//look for an empty frame if one exists
 		if (n_in_frame < nframes) {
 			newframe = n_in_frame;
@@ -173,62 +184,51 @@ void page_fault_handler( struct page_table *pt, int page )
 		}
 		else {
 			//no empty frames - use clock algorithm to select frame to replace
-			int runs = 1;
+			int runs = 0;
 			while (1) {
 				page_table_get_entry(pt, frame_track[p], &pframe, &pbits);
-				if (pbits == 6) {
+				if (pbits == 5) {
 					//PROC_READ|PROC_EXEC
 					page_table_set_entry(pt, frame_track[p], pframe, 1);
 					p = (p+1) % nframes;
-					if (p == 0) {
-						runs ++;
-					}
-					continue;
+					runs ++;
 				}
 				else if (pbits == 1) {
+					newframe = p;
+					oldpage = frame_track[p];
+					p = (p+1) % nframes;
+					break;
+				}
+				else if (pbits == 7) {
+					//PROC_READ|PROC_WRITE|PROC_EXEC
+					page_table_set_entry(pt, frame_track[p], pframe, 3);
+					p = (p+1) % nframes;
+				}
+				else if (pbits == 3){
 					//PROC_READ
 					newframe = p;
 					oldpage = frame_track[p];
-					break;
-				}
-				if (runs < 3) {
+					dirty = 1;
 					p = (p+1) % nframes;
-					if (p == 0) {
-						runs ++;
-					}
-					continue;
-				}
-				if (runs > 2) {
-					//every bit is dirty, a dirty bit has to be included
-					if (pbits == 7) {
-						//PROC_READ|PROC_WRITE|PROC_EXEC
-						page_table_set_entry(pt, frame_track[p], pframe, 3);
-						p = (p+1) % nframes;
-						continue;
-					}
-					else {
-						//PROC_READ|PROC_WRITE
-						newframe = p;
-						dirty = 1;
-						oldpage = frame_track[p];
-						break;
-					}
+					break;
 				}
 			}
 		}
 		//save old page to disk if necissary
 		if (dirty) {
 			disk_write(disk, oldpage, &physmem[newframe*PAGE_SIZE]);
+			diskwrites++;
 		}
 		//read page into physical memory and update frame tracker
 		disk_read(disk, page, &physmem[newframe*PAGE_SIZE]);
+		diskreads++;
 		frame_track[newframe] = page;
 		//update page table for old page if one was overwritten
 		if (oldpage != -1) {
 			page_table_set_entry(pt, oldpage, 0, 0);
 		}
 		//update page table for new page
-		page_table_set_entry(pt, page, newframe, 6);
+		page_table_set_entry(pt, page, newframe, 5);
 		
 	}
 	else if (strcmp(algorithm,"test") == 0) {//--------------------------------------------------------------------
@@ -251,6 +251,11 @@ int main( int argc, char *argv[] )
 	//initialize random number generator
 	time_t t;
 	srand((unsigned) time(&t));
+	
+	//initialize tracking variables
+	pagefaults = 0;
+	diskreads = 0;
+	diskwrites = 0;
 	
 	int npages = atoi(argv[1]);
 	int nframes = atoi(argv[2]);
@@ -301,6 +306,10 @@ int main( int argc, char *argv[] )
 	
 	page_table_delete(pt);
 	disk_close(disk);
+		
+	printf("Page Faults: %d\n", pagefaults);
+	printf("Disk Reads: %d\n", diskreads);
+	printf("Disk Writes: %d\n", diskwrites);
 	
 	return 0;
 }
