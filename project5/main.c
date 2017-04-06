@@ -20,6 +20,7 @@
 struct disk * disk; //the disk
 const char * algorithm; //argv[3] - the sorting algorithm to use
 int * frame_track;
+int n_in_frame;
 char * virtmem;
 char * physmem;
 
@@ -93,6 +94,59 @@ void page_fault_handler( struct page_table *pt, int page )
 	else if (strcmp(algorithm,"fifo") == 0) { //--------------------------------------------------------------------
 		//fifo replacement
 		
+		//give write permission if required and missing
+		int pframe = -1;
+		int pbits = -1;
+		page_table_get_entry(pt, page, &pframe, &pbits);
+		if (pbits == 1) { //PROT_READ
+			//page requires write permissions
+			page_table_set_entry(pt, page, pframe, 3);
+			return;
+		}
+		
+		//get number of frames
+		int nframes = page_table_get_nframes(pt);
+		int newframe;
+		int oldpage = frame_track[0];
+		//get next available frame if one available
+		if (n_in_frame < nframes) {
+			//empty frame available
+			newframe = n_in_frame;
+			oldpage = -1;
+		}
+		else {
+			page_table_get_entry(pt, oldpage, &newframe, &pbits);
+		}
+		//save old page to disk if necissary
+		if (oldpage != -1) {
+			page_table_get_entry(pt, oldpage, &pframe, &pbits);
+			if (pbits == 3) { //PROT_READ|PROT_WRITE
+				disk_write(disk, oldpage, &physmem[newframe*PAGE_SIZE]);
+			}
+		}
+		//read page into physical memory and update frame tracker
+		disk_read(disk, page, &physmem[newframe*PAGE_SIZE]);
+		//update record queue
+		if (oldpage == -1) {
+			//empty frame found, no need to shift, just record new frame
+			frame_track[n_in_frame] = page;
+			n_in_frame ++;
+		}
+		else {
+			//frames full and overwrite took place, shift queue forward
+			int i;
+			for (i=0;i<nframes-1;i++) {
+				frame_track[i] = frame_track[i+1];
+			}
+			frame_track[nframes-1] = page;
+		}
+		//update page table for old page if one was overwritten
+		if (oldpage != -1) {
+			page_table_set_entry(pt, oldpage, 0, 0);
+		}
+		//update page table for new page
+		page_table_set_entry(pt, page, newframe, 1);
+		
 	}
 	else if (strcmp(algorithm,"custom") == 0) { //--------------------------------------------------------------------
 		//custom replacement
@@ -143,6 +197,8 @@ int main( int argc, char *argv[] )
 		frame_tracking[i] = -1;
 	}
 	frame_track = frame_tracking; //global
+	
+	n_in_frame = 0;
 	
 	virtmem = page_table_get_virtmem(pt); //global
 	
