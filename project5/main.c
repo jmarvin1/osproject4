@@ -20,8 +20,8 @@
 struct disk * disk; //the disk
 const char * algorithm; //argv[3] - the sorting algorithm to use
 int * frame_track;
+int * fault_track;
 int n_in_frame;
-int p;
 char * virtmem;
 char * physmem;
 
@@ -160,22 +160,24 @@ void page_fault_handler( struct page_table *pt, int page )
 		
 	}
 	else if (strcmp(algorithm,"custom") == 0) { //--------------------------------------------------------------------
-		//custom replacement - lru using clock algorithm
-
+		//custom replacement - least often faulted 
+		
+		//increment fault count
+		fault_track[page] = fault_track[page] + 1;
+		
 		//give write permission if required and missing
 		int pframe = -1;
 		int pbits = -1;
 		page_table_get_entry(pt, page, &pframe, &pbits);
-		if (pbits == 1 || pbits == 5) { //PROT_READ or PROT_READ|PROT_EXEC
+		if (pbits == 1) { //PROT_READ
 			//page requires write permissions
-			page_table_set_entry(pt, page, pframe, 7);
+			page_table_set_entry(pt, page, pframe, 3);
 			return;
 		}
 		
 		int nframes = page_table_get_nframes(pt);
 		int newframe = -1;
 		int oldpage = -1;
-		int dirty = 0;
 		
 		//look for an empty frame if one exists
 		if (n_in_frame < nframes) {
@@ -183,42 +185,26 @@ void page_fault_handler( struct page_table *pt, int page )
 			n_in_frame++;
 		}
 		else {
-			//no empty frames - use clock algorithm to select frame to replace
-			int runs = 0;
-			while (1) {
-				page_table_get_entry(pt, frame_track[p], &pframe, &pbits);
-				if (pbits == 5) {
-					//PROC_READ|PROC_EXEC
-					page_table_set_entry(pt, frame_track[p], pframe, 1);
-					p = (p+1) % nframes;
-					runs ++;
-				}
-				else if (pbits == 1) {
-					//PROT_READ
-					newframe = p;
-					oldpage = frame_track[p];
-					p = (p+1) % nframes;
-					break;
-				}
-				else if (pbits == 7) {
-					//PROT_READ|PROT_WRITE|PROT_EXEC
-					page_table_set_entry(pt, frame_track[p], pframe, 3);
-					p = (p+1) % nframes;
-				}
-				else if (pbits == 3){
-					//PROT_READ | PROT_WRITE
-					newframe = p;
-					oldpage = frame_track[p];
-					dirty = 1;
-					p = (p+1) % nframes;
-					break;
+			//select least faulted page in frame
+			int leastfaults = 2147483640;
+			int i,tpage;
+			for (i=0;i<nframes;i++) {
+				tpage = frame_track[i];
+				if (fault_track[tpage] < leastfaults) {
+					oldpage = tpage;
+					newframe = i;
+					leastfaults = fault_track[tpage];
 				}
 			}
 		}
 		//save old page to disk if necissary
-		if (dirty) {
-			disk_write(disk, oldpage, &physmem[newframe*PAGE_SIZE]);
-			diskwrites++;
+		if (oldpage != -1) {
+			page_table_get_entry(pt, oldpage, &pframe, &pbits);
+			if (pbits == 3) {
+				//page is dirty, needs to be rewritten
+				disk_write(disk, oldpage, &physmem[newframe*PAGE_SIZE]);
+				diskwrites++;
+			}
 		}
 		//read page into physical memory and update frame tracker
 		disk_read(disk, page, &physmem[newframe*PAGE_SIZE]);
@@ -229,7 +215,7 @@ void page_fault_handler( struct page_table *pt, int page )
 			page_table_set_entry(pt, oldpage, 0, 0);
 		}
 		//update page table for new page
-		page_table_set_entry(pt, page, newframe, 5);
+		page_table_set_entry(pt, page, newframe, 1);
 		
 	}
 	else if (strcmp(algorithm,"test") == 0) {//--------------------------------------------------------------------
@@ -276,6 +262,7 @@ int main( int argc, char *argv[] )
 		return 1;
 	}
 	
+	//initialize frame tracking
 	int frame_tracking [nframes];
 	int i;
 	for (i=0;i<nframes;i++) {
@@ -285,7 +272,11 @@ int main( int argc, char *argv[] )
 	
 	n_in_frame = 0; //global
 	
-	p = 0; //global
+	int fault_tracking [npages];
+	for (i=0; i<npages; i++) {
+		fault_tracking[i] = 0;
+	}
+	fault_track = fault_tracking;
 	
 	virtmem = page_table_get_virtmem(pt); //global
 	
