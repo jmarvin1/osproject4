@@ -20,6 +20,7 @@
 char * free_block_bitmap = 0; // Usage:
 									//	1 - block is in use
 									//	0 - block is empty
+int ninodeblocks = 0;
 
 // ---------- Data Structures ----------
 
@@ -56,7 +57,11 @@ int fs_format()
 	union fs_block superblock;
 	superblock.super.magic = FS_MAGIC;
 	superblock.super.nblocks = disk_size();
-	superblock.super.ninodeblocks = superblock.super.nblocks/10;
+	ninodeblocks = superblock.super.nblocks/10; // store in global for reference without loads
+	if (ninodeblocks == 0) {
+		ninodeblocks = 1; // ensure inodes can be created
+	}
+	superblock.super.ninodeblocks = ninodeblocks;
 	superblock.super.ninodes = superblock.super.ninodeblocks * INODES_PER_BLOCK;
 	// --- Write Superblock to Disk --- 
 	disk_write(0, superblock.data);
@@ -177,7 +182,27 @@ int fs_mount()
 
 int fs_create()
 {
-	return 0;
+	union fs_block block;
+	int i;
+	int j = 1;
+	int inumber = 0;
+	for (i=1; i <= ninodeblocks; i++) {
+		disk_read(i, block.data);
+		for (j = j; j < INODES_PER_BLOCK*i; j++) {
+			if (block.inode[j%INODES_PER_BLOCK].isvalid == 0) {
+				inumber = j;
+				block.inode[inumber].isvalid = 1;
+				block.inode[inumber].size = 0;
+				for (j=0; j < POINTERS_PER_INODE; j++) {
+					block.inode[inumber].direct[j] = 0;
+				}
+				block.inode[inumber].indirect = 0;
+				disk_write(i, block.data);
+				return inumber;
+			}
+		}
+	}
+	return inumber;
 }
 
 int fs_delete( int inumber )
