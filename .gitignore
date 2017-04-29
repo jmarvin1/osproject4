@@ -5,3 +5,5 @@ site-tester
 myvirtualdisk
 virtmem
 .__afs*
+simplefs
+
