@@ -45,6 +45,54 @@ union fs_block {
 	char data[DISK_BLOCK_SIZE];
 };
 
+// ---------- Helper Functions ----------
+
+void inode_load( int inumber, struct fs_inode *inode ) {
+	// --- convert inumber to block number and offset ---
+	int i, blocknum;
+	int offset = inumber % INODES_PER_BLOCK;
+	for (i=1; i <=ninodeblocks; i++) {
+		if (inumber < INODES_PER_BLOCK*i) {
+			blocknum = i;
+			break;
+		}
+	}
+	// --- Load Block ---
+	union fs_block block;
+	disk_read(blocknum, block.data);
+	// --- Load Data Into Inode Pointer ---
+	inode->isvalid = block.inode[offset].isvalid;
+	inode->size = block.inode[offset].size;
+	for (i=0; i<POINTERS_PER_INODE; i++) {
+		inode->direct[i] = block.inode[offset].direct[i];
+	}
+	inode->indirect = block.inode[offset].indirect;
+}
+
+void inode_save( int inumber, struct fs_inode *inode ) {
+	// --- convert inumber to block number and offset ---
+	int i, blocknum;
+	int offset = inumber % INODES_PER_BLOCK;
+	for (i=1; i <=ninodeblocks; i++) {
+		if (inumber < INODES_PER_BLOCK*i) {
+			blocknum = i;
+			break;
+		}
+	}
+	// --- Load Block ---
+	union fs_block block;
+	disk_read(blocknum, block.data);
+	// --- Place inode into Block ---
+	block.inode[offset].isvalid = inode->isvalid;
+	block.inode[offset].size = inode->size;
+	for (i=0; i<POINTERS_PER_INODE; i++) {
+		block.inode[offset].direct[i] = inode->direct[i];
+	}
+	block.inode[offset].indirect = inode->indirect;
+	// --- Write Block to Disk
+	disk_write(blocknum, block.data);
+}
+
 // ---------- Primary FS Functions ----------
 
 int fs_format()
@@ -176,6 +224,11 @@ int fs_mount()
 			}
 		}
 	}
+	// --- Debug ---
+	for (i=0; i<superblock.super.nblocks; i++) {
+		printf("%d ", free_block_bitmap[i]);
+	}
+	printf("\n");
 	// --- Return Successfully ---
 	return 1;
 }
@@ -207,7 +260,41 @@ int fs_create()
 
 int fs_delete( int inumber )
 {
-	return 0;
+	// --- Ensure Valid inumber ---
+	if (inumber == 0) {
+		return 0;
+	}
+	// --- Load Relevant Inode ---
+	struct fs_inode inode;
+	inode_load(inumber, &inode);
+	// --- Reject if Inode Is Invalid ---
+	if (inode.isvalid == 0) {
+		return 0;
+	}
+	// --- Free Associated Blocks In free_block_bitmap ---
+	int i;
+	// --- Direct Blocks ---
+	for (i=0; i<POINTERS_PER_INODE; i++) {
+		if (inode.direct[i]) {
+			free_block_bitmap[inode.direct[i]] = 0;
+		}
+	}
+	// --- Indirect Block ---
+	if (inode.indirect) {
+		free_block_bitmap[inode.indirect] = 0;
+		union fs_block block;
+		disk_read(inode.indirect, block.data);
+		for(i=0; i<POINTERS_PER_BLOCK; i++) {
+			if (block.pointers[i]) {
+				free_block_bitmap[block.pointers[i]] = 0;
+			}
+		}
+	}
+	// --- Mark Inode as Invalid on Disk
+	inode.isvalid = 0;
+	inode_save(inumber, &inode);
+	// --- Exit Successfully ---
+	return 1;
 }
 
 int fs_getsize( int inumber )
