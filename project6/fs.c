@@ -372,7 +372,7 @@ int fs_read( int inumber, char *data, int length, int offset )
 			disk_read(indirect.pointers[blocknum],block.data);
 		}
 		// --- Write to Data ---
-		if(bytes_read==0 && ofset%DISK_BLOCK_SIZE !=0){
+		if(bytes_read==0 && offset%DISK_BLOCK_SIZE !=0){
 			bytes_remaining= DISK_BLOCK_SIZE - (offset%DISK_BLOCK_SIZE);
 			for(i=0;i<bytes_remaining;i++)
 			{
