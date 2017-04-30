@@ -315,7 +315,109 @@ int fs_getsize( int inumber )
 
 int fs_read( int inumber, char *data, int length, int offset )
 {
-	return 0;
+	// --- Ensure Valid inumber ---
+        if (inumber == 0) {
+                return 0;
+        }
+        // --- Load Relevant Inode ---
+        struct fs_inode inode;
+        inode = inode_load(inumber);
+        // --- Reject if Inode Is Invalid ---
+        if (inode.isvalid == 0) {
+                return 0;
+        }
+
+	if(offset>=inode.size){
+		return 0;
+	}
+	
+	//----Copy "length" bytes from inode to "data" starting at offset 
+	//Get start point
+	int blocknum=0;
+	int i;
+	for(i=1;i<=POINTERS_PER_INODE;i++){
+		if(offset < (DISK_BLOCK_SIZE*i))
+		{
+			blocknum=i;
+			break;
+		}
+	}
+	char isindirect=0;
+	if(blocknum==0){
+		//look at indirect block
+		union fs_block indirect;
+		disk_read(inode.indirect, indirect.data);
+		isindirect=1;
+		for(i=0;i<POINTERS_PER_BLOCK;i++)
+		{
+			if(offset < (DISK_BLOCK_SIZE*(i+1))+(DISK_BLOCK_SIZE*POINTERS_PER_INODE))
+			{
+				blocknum=i;
+				break;
+			}
+				
+		}
+	}
+
+	//start reading the data 
+	union fs_block block;
+	int bytes_read=0;
+	int bytes_remaining;
+	while(offset!=bytes_read){
+		// --- Get Next Block ---
+		if(isindirect==0){
+			disk_read(inode.direct[blocknum],block.data);	
+		}
+		else{
+			disk_read(indirect.pointers[blocknum],block.data);
+		}
+		// --- Write to Data ---
+		if(bytes_read==0 && ofset%DISK_BLOCK_SIZE !=0){
+			bytes_remaining= DISK_BLOCK_SIZE - (offset%DISK_BLOCK_SIZE);
+			for(i=0;i<bytes_remaining;i++)
+			{
+				data[bytes_read]=block.data[i];
+				bytes_read++;
+			}
+			//increment block num and load indirect if necessary
+			blocknum++;
+			if(blocknum>=POINTERS_PER_INODE && isindirect==0)
+			{
+				union fs_block indirect;
+				disk_read(inode.indirect,indirect.data);
+				blocknum=0;
+				isindirect=1;
+			}
+		}
+		else if(offset-bytes_read>=DISK_BLOCK_SIZE){
+			//read full block to data
+			for(i=0;i<DISK_BLOCK_SIZE;i++)
+			{
+				data[bytes_read]=block.data[i];
+				bytes_read++;
+			}
+			//increment block num and load indirect if necessary
+			blocknum++;
+                        if(blocknum>=POINTERS_PER_INODE && isindirect==0)
+                        {
+                                union fs_block indirect;
+                                disk_read(inode.indirect,indirect.data);
+                                blocknum=0;
+                                isindirect=1;
+                        }
+		}
+		else{
+			bytes_remaining=offset-bytes_read;
+			//read partial block to data 
+			for(i=0;i<bytes_remaining;i++)
+			{
+				data[bytes_read]=block.data[i];
+				bytes_read++;
+			}
+
+		}	
+	}
+	return bytes_read;
 }
 
 int fs_write( int inumber, const char *data, int length, int offset )
