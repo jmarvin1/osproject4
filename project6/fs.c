@@ -249,8 +249,8 @@ int fs_create()
 	int inumber = 0;
 	for (i=1; i <= ninodeblocks; i++) {
 		disk_read(i, block.data);
-		for (j=j; j < INODES_PER_BLOCK*i; j++) {
-			if (block.inode[j%INODES_PER_BLOCK].isvalid == 0) {
+		for (j=INODES_PER_BLOCK*(i-1); j < INODES_PER_BLOCK*i; j++) {
+			if (j!=0 && block.inode[j%INODES_PER_BLOCK].isvalid == 0) {
 				inumber = j;
 				block.inode[inumber].isvalid = 1;
 				block.inode[inumber].size = 0;
