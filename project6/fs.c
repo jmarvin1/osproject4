@@ -334,24 +334,25 @@ int fs_read( int inumber, char *data, int length, int offset )
 	
 	// --- Copy "length" bytes from inode to "data" starting at offset ---
 	//Get start point
-	int blocknum=0;
+	int blocknum=-1;
 	int i;
-	for(i=1;i<=POINTERS_PER_INODE;i++){
-		if(offset < (DISK_BLOCK_SIZE*i))
+	char isindirect=1;
+	for(i=0;i<POINTERS_PER_INODE;i++){
+		if(offset < (DISK_BLOCK_SIZE*(i+1)))
 		{
 			blocknum=i;
+			isindirect=0;
 			break;
 		}
 	}
 	union fs_block indirect;
-	char isindirect=0;
-	if(blocknum==0){
+	if(blocknum==-1){
 		//look at indirect block
 		disk_read(inode.indirect, indirect.data);
 		isindirect=1;
 		for(i=0;i<POINTERS_PER_BLOCK;i++)
 		{
-			if(offset < (DISK_BLOCK_SIZE*(i+1))+(DISK_BLOCK_SIZE*POINTERS_PER_INODE))
+			if(offset < ((DISK_BLOCK_SIZE*(i+1))+(DISK_BLOCK_SIZE*POINTERS_PER_INODE)))
 			{
 				blocknum=i;
 				break;
@@ -375,11 +376,14 @@ int fs_read( int inumber, char *data, int length, int offset )
 		
 		// --- Write to Data ---
 		if(bytes_read==0 && offset%DISK_BLOCK_SIZE !=0){
-			bytes_remaining= DISK_BLOCK_SIZE - (offset%DISK_BLOCK_SIZE);
+			bytes_remaining= DISK_BLOCK_SIZE - offset;
 			for(i=0;i<bytes_remaining;i++)
 			{
 				data[bytes_read]=block.data[i];
 				bytes_read++;
+				if (bytes_read+offset == inode.size) {
+					return bytes_read;
+				}
 			}
 			//increment block num and load indirect if necessary
 			blocknum++;
@@ -390,21 +394,24 @@ int fs_read( int inumber, char *data, int length, int offset )
 				isindirect=1;
 			}
 		}
-		else if(length-bytes_read>=DISK_BLOCK_SIZE){
+		else if((length-bytes_read)>=DISK_BLOCK_SIZE){
 			//read full block to data
 			for(i=0;i<DISK_BLOCK_SIZE;i++)
 			{
 				data[bytes_read]=block.data[i];
 				bytes_read++;
+				if (bytes_read+offset == inode.size) {
+					return bytes_read;
+				}
 			}
 			//increment block num and load indirect if necessary
 			blocknum++;
-                        if(blocknum>=POINTERS_PER_INODE && isindirect==0)
-                        {
-                                disk_read(inode.indirect,indirect.data);
-                                blocknum=0;
-                                isindirect=1;
-                        }
+			if(blocknum>=POINTERS_PER_INODE && isindirect==0)
+			{
+				disk_read(inode.indirect,indirect.data);
+				blocknum=0;
+				isindirect=1;
+			}
 		}
 		else{
 			bytes_remaining=length-bytes_read;
@@ -413,9 +420,23 @@ int fs_read( int inumber, char *data, int length, int offset )
 			{
 				data[bytes_read]=block.data[i];
 				bytes_read++;
+				if (bytes_read+offset == inode.size) {
+					return bytes_read;
+				}
 			}
 
-		}	
+		}
+		// --- Ensure Next Data Block is Valid ---
+		if (isindirect == 0) {
+			if (inode.direct[blocknum] == 0) {
+				return bytes_read;
+			}
+		}
+		else {
+			if (indirect.pointers[blocknum] == 0) {
+				return bytes_read;
+			}
+		}
 	}
 	return bytes_read;
 }
