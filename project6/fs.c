@@ -100,6 +100,21 @@ void inode_save( int inumber, struct fs_inode inode ) {
 	}
 }
 
+int claim_bitmap() {
+	// --- return next availaible block from bitmap or 0 if bitmap full ---
+	int block = 0;
+	int i;
+	int dsk_size = disk_size();
+	for (i=0; i<dsk_size; i++) {
+		if (free_block_bitmap[i] == 0) {
+			free_block_bitmap[i] = 1;
+			block = i;
+			return block;
+		}
+	}
+	return block;
+}
+
 // ---------- Primary FS Functions ----------
 
 int fs_format()
@@ -373,7 +388,6 @@ int fs_read( int inumber, char *data, int length, int offset )
 		else{
 			disk_read(indirect.pointers[blocknum],block.data);
 		}
-		
 		// --- Write to Data ---
 		if(bytes_read==0 && offset%DISK_BLOCK_SIZE !=0){
 			bytes_remaining= DISK_BLOCK_SIZE - offset;
@@ -443,5 +457,194 @@ int fs_read( int inumber, char *data, int length, int offset )
 
 int fs_write( int inumber, const char *data, int length, int offset )
 {
-	return 0;
+	// --- Load and Validate Inode ---
+	struct fs_inode inode;
+	inode = inode_load(inumber);
+	if (inode.isvalid == 0) {
+		return 0;
+	}
+	// --- Variables ---
+	union fs_block block;
+	union fs_block indirect;
+	int blocknum = -1;
+	int bytes_written = 0;
+	char isindirect = 1;
+	int i, disk_block;
+	// ---------- Write Data To Disk ----------
+	
+	// ---------- Find Block Cooresponding to Start of Data ----------
+	// --- Look Through Direct Blocks ---
+	for (i=0; i<POINTERS_PER_INODE; i++) {
+		if (offset < (DISK_BLOCK_SIZE*(i+1))) {
+			blocknum = i;
+			isindirect = 0;
+			// --- Ensure Desired Direct Block Exists ---
+			if (inode.direct[blocknum] == 0) {
+				inode.direct[blocknum] = claim_bitmap();
+				if (inode.direct[blocknum] == 0) {
+					// --- Disk Full ---
+					return bytes_written;
+				}
+				inode_save(inumber, inode);
+			}
+			break;
+		}
+	}
+	// --- If Necissary, Look Through Indirect Blocks ---
+	if (isindirect) {
+		// --- Ensure Indirect Block Exists ---
+		if (inode.indirect == 0) {
+			inode.indirect = claim_bitmap();
+			if (inode.indirect == 0) {
+				// --- Disk Full ---
+				return bytes_written;
+			}
+			inode_save(inumber, inode);
+		}
+		// --- Load Indirect Block ---
+		disk_read(inode.indirect, indirect.data);
+		// --- Look Through Indirect Blocks ---
+		for (i=0; i<POINTERS_PER_BLOCK; i++) {
+			if (offset < (DISK_BLOCK_SIZE*(i+1) + DISK_BLOCK_SIZE*POINTERS_PER_INODE)) {
+				blocknum = i;
+				break;
+			}
+		}
+		// --- Fail if Size of Indirect Block Exceeded ---
+		if (blocknum == -1) {
+			return bytes_written;
+		}
+		// --- Check if Block Avaialble in Indirect Block ---
+		if (indirect.pointers[blocknum] == 0) {
+			// --- Create New Indirect Data Block ---
+			indirect.pointers[blocknum] = claim_bitmap();
+			if (indirect.pointers[blocknum] == 0) {
+				// --- Disk Full ---
+				return bytes_written;
+			}
+			disk_write(inode.indirect, indirect.data);
+		}
+	}
+	
+	// --------- Loop Until All Data Written or Until Disk Full ----------
+	while(bytes_written != length) {
+		// --- Get Next Block ---
+		if(isindirect==0){
+			disk_read(inode.direct[blocknum],block.data);
+			disk_block = inode.direct[blocknum];
+		}
+		else{
+			disk_read(indirect.pointers[blocknum],block.data);
+			disk_block = indirect.pointers[blocknum];
+		}
+		// ---------- Write To Disk ----------
+		// --- Special Case: Starting In the Middle of an Existing Block
+		if (bytes_written == 0 && offset%DISK_BLOCK_SIZE != 0) {
+			for (i=offset; i<DISK_BLOCK_SIZE; i++) {
+				block.data[i] = data[bytes_written];
+				bytes_written++;
+				// --- Exit If Full Length Written ---
+				if (bytes_written == length) {
+					// --- Save Block ---
+					disk_write(disk_block, block.data);
+					// --- Update Inode Size ---
+					if ((offset+length) > inode.size) {
+						inode.size = offset+length;
+						inode_save(inumber, inode);
+					}
+					// --- Exit Successfully ---
+					return bytes_written;
+				}
+			}
+		}
+		// --- Write Full Block or Until Write is Completed ---
+		else {
+			for (i=0; i<DISK_BLOCK_SIZE; i++) {
+				block.data[i] = data[bytes_written];
+				bytes_written++;
+				// --- Exit If Full Length Written ---
+				if (bytes_written == length) {
+					// --- Save Block ---
+					disk_write(disk_block, block.data);
+					// --- Update Inode Size ---
+					if ((offset+length) > inode.size) {
+						inode.size = offset+length;
+						inode_save(inumber, inode);
+					}
+					// --- Exit Successfully ---
+					return bytes_written;
+				}
+			}
+		}
+		// --- Save Fully Written Block ---
+		disk_write(disk_block, block.data);
+		// --- Find Next Block ---
+		blocknum++;
+		if (blocknum >= POINTERS_PER_INODE && isindirect == 0) {
+			// --- Ensure Indirect Block Exists ---
+			if (inode.indirect == 0) {
+				inode.indirect = claim_bitmap();
+				if (inode.indirect == 0) {
+					// --- Disk Full ---
+					// --- Update Inode Size ---
+					if ((offset+bytes_written) > inode.size) {
+						inode.size = offset+bytes_written;
+						inode_save(inumber, inode);
+					}
+					// --- Exit ---
+					return bytes_written;
+				}
+				inode_save(inumber, inode);
+			}
+			disk_read(inode.indirect, indirect.data);
+			blocknum = 0;
+			isindirect = 1;
+		}
+		// --- Ensure Next Block Is Available ---
+		if (isindirect == 0) {
+			if (inode.direct[blocknum] == 0) {
+				inode.direct[blocknum] = claim_bitmap();
+				if (inode.direct[blocknum] == 0) {
+					// --- Disk Full ---
+					// --- Update Inode Size ---
+					if ((offset+bytes_written) > inode.size) {
+						inode.size = offset+bytes_written;
+						inode_save(inumber, inode);
+					}
+					// --- Exit ---
+					return bytes_written;
+				}
+				inode_save(inumber, inode);
+			}
+		}
+		else {
+			// --- Fail if Size of Indirect Block Exceeded ---
+			if (blocknum >= POINTERS_PER_BLOCK) {
+				// --- Update Inode Size ---
+				if ((offset+bytes_written) > inode.size) {
+					inode.size = offset+bytes_written;
+					inode_save(inumber, inode);
+				}
+				// --- Exit ---
+				return bytes_written;
+			}
+			// --- Check if Block Avaialble in Indirect Block ---
+			if (indirect.pointers[blocknum] == 0) {
+				// --- Create New Indirect Data Block ---
+				indirect.pointers[blocknum] = claim_bitmap();
+				if (indirect.pointers[blocknum] == 0) {
+					// --- Disk Full ---
+					// --- Update Inode Size ---
+					if ((offset+bytes_written) > inode.size) {
+						inode.size = offset+bytes_written;
+						inode_save(inumber, inode);
+					}
+					// --- Exit ---
+					return bytes_written;
+				}
+				disk_write(inode.indirect, indirect.data);
+			}
+		}
+	}
+	return bytes_written;
 }
