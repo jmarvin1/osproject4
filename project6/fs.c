@@ -227,11 +227,11 @@ int fs_mount()
 			}
 		}
 	}
-	// --- Debug ---
+	/* --- Debug ---
 	for (i=0; i<superblock.super.nblocks; i++) {
 		printf("%d ", free_block_bitmap[i]);
 	}
-	printf("\n");
+	printf("\n"); */
 	// --- Return Successfully ---
 	return 1;
 }
@@ -302,7 +302,15 @@ int fs_delete( int inumber )
 
 int fs_getsize( int inumber )
 {
-	return -1;
+	// --- Load Inode ---
+	struct fs_inode inode;
+	inode = inode_load(inumber);
+	// --- Return Failure if Invalid ---
+	if (inode.isvalid == 0) {
+		return -1;
+	}
+	// --- Return Inode Size ---
+	return inode.size;
 }
 
 int fs_read( int inumber, char *data, int length, int offset )
