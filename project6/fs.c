@@ -47,9 +47,10 @@ union fs_block {
 
 // ---------- Helper Functions ----------
 
-void inode_load( int inumber, struct fs_inode *inode ) {
+struct fs_inode inode_load( int inumber ) {
 	// --- convert inumber to block number and offset ---
 	int i, blocknum;
+	struct fs_inode inode;
 	int offset = inumber % INODES_PER_BLOCK;
 	for (i=1; i <=ninodeblocks; i++) {
 		if (inumber < INODES_PER_BLOCK*i) {
@@ -61,15 +62,17 @@ void inode_load( int inumber, struct fs_inode *inode ) {
 	union fs_block block;
 	disk_read(blocknum, block.data);
 	// --- Load Data Into Inode Pointer ---
-	inode->isvalid = block.inode[offset].isvalid;
-	inode->size = block.inode[offset].size;
+	inode.isvalid = block.inode[offset].isvalid;
+	inode.size = block.inode[offset].size;
 	for (i=0; i<POINTERS_PER_INODE; i++) {
-		inode->direct[i] = block.inode[offset].direct[i];
+		inode.direct[i] = block.inode[offset].direct[i];
 	}
-	inode->indirect = block.inode[offset].indirect;
+	inode.indirect = block.inode[offset].indirect;
+	// --- Return Inode ---
+	return inode;
 }
 
-void inode_save( int inumber, struct fs_inode *inode ) {
+void inode_save( int inumber, struct fs_inode inode ) {
 	// --- convert inumber to block number and offset ---
 	int i, blocknum;
 	int offset = inumber % INODES_PER_BLOCK;
@@ -83,12 +86,12 @@ void inode_save( int inumber, struct fs_inode *inode ) {
 	union fs_block block;
 	disk_read(blocknum, block.data);
 	// --- Place inode into Block ---
-	block.inode[offset].isvalid = inode->isvalid;
-	block.inode[offset].size = inode->size;
+	block.inode[offset].isvalid = inode.isvalid;
+	block.inode[offset].size = inode.size;
 	for (i=0; i<POINTERS_PER_INODE; i++) {
-		block.inode[offset].direct[i] = inode->direct[i];
+		block.inode[offset].direct[i] = inode.direct[i];
 	}
-	block.inode[offset].indirect = inode->indirect;
+	block.inode[offset].indirect = inode.indirect;
 	// --- Write Block to Disk
 	disk_write(blocknum, block.data);
 }
@@ -266,7 +269,7 @@ int fs_delete( int inumber )
 	}
 	// --- Load Relevant Inode ---
 	struct fs_inode inode;
-	inode_load(inumber, &inode);
+	inode = inode_load(inumber);
 	// --- Reject if Inode Is Invalid ---
 	if (inode.isvalid == 0) {
 		return 0;
@@ -292,7 +295,7 @@ int fs_delete( int inumber )
 	}
 	// --- Mark Inode as Invalid on Disk
 	inode.isvalid = 0;
-	inode_save(inumber, &inode);
+	inode_save(inumber, inode);
 	// --- Exit Successfully ---
 	return 1;
 }
